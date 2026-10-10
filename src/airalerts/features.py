@@ -105,7 +105,8 @@ def horizon_features(p: HourlyPanel, h: int) -> dict[str, np.ndarray]:
 
 
 def build_dataset(p: HourlyPanel, horizons=config.HORIZONS,
-                  origin_start: pd.Timestamp | None = None) -> pd.DataFrame:
+                  origin_start: pd.Timestamp | None = None,
+                  extra: dict[str, np.ndarray] | None = None) -> pd.DataFrame:
     """Long table: one row per (origin hour, region, horizon) with target ``y``.
 
     Rows whose target hour lies beyond the panel are kept with ``y = NaN`` so that
@@ -113,6 +114,8 @@ def build_dataset(p: HourlyPanel, horizons=config.HORIZONS,
     """
     T, R = p.occ.shape
     of = origin_features(p)
+    if extra:  # e.g. Telegram text features, already aligned with panel rows
+        of = {**of, **extra}
     A = p.any_active.astype(np.float32)
     i0 = 0 if origin_start is None else int(p.index.searchsorted(origin_start))
     rows = np.arange(i0, T)

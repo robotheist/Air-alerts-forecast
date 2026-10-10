@@ -69,3 +69,36 @@ def test_target_time_after_origin(alerts):
     d = features.build_dataset(p)
     assert (d.target_time >= d.origin_time).all()
     assert ((d.target_time - d.origin_time) == pd.to_timedelta(d.h - 1, unit="h")).all()
+
+
+def test_text_features_do_not_see_the_future():
+    """Posts published at or after the origin must not affect its text features."""
+    from airalerts import text_features as tf
+
+    start = pd.Timestamp("2026-03-01", tz="UTC")
+    alerts = _synthetic_alerts(days=10)
+    alerts["started_at"] += start - pd.Timestamp("2026-01-01", tz="UTC")
+    alerts["finished_at"] += start - pd.Timestamp("2026-01-01", tz="UTC")
+    p = data.build_panel(alerts)
+    rng = np.random.default_rng(1)
+    texts = ["🛵 Групи БпЛА на півночі Сумщини", "На Київ", "Ракети на Харків",
+             "🏍 Реактивний БпЛА на Теплик", "Загроза балістики з півдня"]
+    times = start + pd.to_timedelta(np.sort(rng.uniform(0, 9 * 24 * 60, 3000)), unit="min")
+    posts = pd.DataFrame({"published_at": times, "text": rng.choice(texts, len(times))})
+    gaz = {"теплик": "Vinnytska oblast"}
+
+    def feats(ps):
+        m, th = tf.extract(ps, gaz)
+        return tf.text_feature_arrays(p, ps, m, th)
+
+    full = feats(posts)
+    cut_row = 100
+    cut = p.index[cut_row] + pd.Timedelta(hours=1)          # origin of row 100
+    known = feats(posts[posts.published_at < cut])
+    for k in full:
+        np.testing.assert_array_equal(full[k][: cut_row + 1], known[k][: cut_row + 1], err_msg=k)
+    # a post exactly at the origin time is NOT visible to that origin
+    edge = pd.concat([posts[posts.published_at < cut],
+                      pd.DataFrame({"published_at": [cut], "text": ["Ракети на Харків"]})])
+    e = feats(edge)
+    np.testing.assert_array_equal(e["tg_missile_60m"][cut_row], known["tg_missile_60m"][cut_row])

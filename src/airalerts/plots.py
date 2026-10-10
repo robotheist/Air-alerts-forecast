@@ -65,7 +65,7 @@ def hour_region_heatmap(panel, days=28, name="02_hour_by_region_heatmap.png"):
     _save(fig, name)
 
 
-MODEL_COLORS = {"logreg_v1": C[0], "lgb_v2": C[1], "lgb_v3_text": C[2]}
+MODEL_COLORS = {"logreg_v1": C[0], "lgb_v2": C[1], "lgb_v3_text": C[2], "lgb_v2_short": C[3]}
 
 
 def skill_by_horizon(table: pd.DataFrame, quiet_table: pd.DataFrame,
@@ -116,18 +116,19 @@ def reliability_plot(df: pd.DataFrame, col: str, horizons=(1, 6, 24),
     _save(fig, name)
 
 
-def example_timeline(df: pd.DataFrame, col: str, region: str, h: int, days=7,
+def example_timeline(df: pd.DataFrame, cols: list[str], region: str, h: int, days=7,
                      name="05_example_timeline.png"):
     g = df[(df.region == region) & (df.h == h)].sort_values("target_time")
     g = g[g.target_time >= g.target_time.max() - pd.Timedelta(days=days)]
     t = g.target_time.dt.tz_convert(config.LOCAL_TZ)
     fig, ax = plt.subplots(figsize=(10, 3.2))
     ax.fill_between(t, 0, g.y, step="post", color="#cde2fb", lw=0, label="alert active")
-    ax.plot(t, g[col], color=C[1], lw=1.6, label=f"forecast made {h} h earlier")
+    for c in cols:
+        ax.plot(t, g[c], color=MODEL_COLORS.get(c, C[1]), lw=1.4, label=f"{c}, made {h} h earlier")
     ax.set_ylim(0, 1.02)
     ax.set_ylabel("P(alert)")
     ax.set_title(f"{region}: forecast {h} h ahead vs. what happened (last {days} days of test)")
-    ax.legend(loc="upper left", ncols=2)
+    ax.legend(loc="upper left", ncols=3)
     _save(fig, name)
 
 

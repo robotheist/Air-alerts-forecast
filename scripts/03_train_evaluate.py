@@ -30,21 +30,30 @@ if __name__ == "__main__":
         blocks.append((t0, min(t0 + REFIT_EVERY, split.test_end + pd.Timedelta(hours=1))))
         t0 += REFIT_EVERY
 
-    learned = {"logreg_v1": models.LogRegModel, "lgb_v2": models.LGBModel}
-    importances = []
+    # name -> (model factory, first origin allowed in training)
+    learned = {"logreg_v1": (models.LogRegModel, df.origin_time.min()),
+               "lgb_v2": (models.LGBModel, df.origin_time.min())}
+    has_text = "tg_reg_60m" in df.columns
+    if has_text:
+        text_start = df.loc[df.tg_reg_60m.notna(), "origin_time"].min()
+        print(f"telegram features available from {text_start:%Y-%m-%d %H:%M} UTC")
+        # fair comparison: v2 and v3 trained on exactly the same (shorter) window
+        learned["lgb_v2_short"] = (models.LGBModel, text_start)
+        learned["lgb_v3_text"] = (lambda: models.LGBModel(models.V3_FEATURES), text_start)
+    importances = {}
     for start, end in blocks:
         test = df[ev.period_mask(df, start, end)].copy()
-        train = df[ev.train_mask(df, df.origin_time.min(), start)]
         for name in models.BASELINES:
             test[name] = models.predict_baseline(test, name)
-        for name, cls in learned.items():
+        for name, (make, train_from) in learned.items():
+            train = df[ev.train_mask(df, train_from, start)]
             tic = time.time()
-            m = cls().fit(train)
+            m = make().fit(train)
             test[name] = m.predict(test)
             print(f"  block {start:%m-%d}: {name} trained on {len(train):,} rows "
                   f"in {time.time() - tic:.0f}s")
-            if name == "lgb_v2":
-                importances.append(m.importance())
+            if name.startswith("lgb"):
+                importances.setdefault(name, []).append(m.importance())
         preds.append(test)
 
     test = pd.concat(preds, ignore_index=True)
@@ -72,11 +81,14 @@ if __name__ == "__main__":
                   .loc[names].round(4).to_string())
 
     panel = data.build_panel(data.load_alerts())
-    imp = pd.concat(importances, axis=1).mean(axis=1).sort_values(ascending=False)
+    best = "lgb_v3_text" if has_text else "lgb_v2"
+    imp = pd.concat(importances[best], axis=1).mean(axis=1).sort_values(ascending=False)
+    imp.to_csv(config.METRICS / f"feature_importance_{best}.csv", header=["gain"])
     plots.alert_share_over_time(panel)
     plots.hour_region_heatmap(panel)
-    plots.skill_by_horizon(table, quiet_table)
-    plots.reliability_plot(test, "lgb_v2")
-    plots.example_timeline(test, "lgb_v2", "Kyiv City", h=1)
+    shown = ["logreg_v1", "lgb_v2"] + (["lgb_v3_text"] if has_text else [])
+    plots.skill_by_horizon(table, quiet_table, models=shown)
+    plots.reliability_plot(test, best)
+    plots.example_timeline(test, shown[-2:], "Kyiv City", h=1)
     plots.importance_plot(imp)
     print(f"\nfigures -> {config.FIGURES.relative_to(config.ROOT)}")
