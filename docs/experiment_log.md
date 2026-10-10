@@ -1,0 +1,81 @@
+# Experiment log
+
+Chronological notes on what was tried, what failed and why the design changed.
+Numbers are Brier scores (lower is better) unless stated otherwise.
+*Validation* = 28 days before the test period (15.08–12.09.2026), *test* = last
+28 days (12.09–10.10.2026, never used for any choice).
+
+## 0. Data choice
+- Two sources in [Vadimkin/ukrainian-air-raid-sirens-dataset](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset):
+  *official* (raion/hromada level) and *volunteer* (eTryvoga, oblast level).
+- The official file stops on 2026-09-07 and changed its unit from oblast to raion in Dec 2025
+  (a structural break). The volunteer file is updated daily (last record: the morning of
+  2026-10-10) and is consistent since 2022 → **volunteer data is used**.
+- Luhansk oblast (permanent alert since 2022) is excluded; 24 regions remain (incl. Kyiv City).
+- Alerts longer than 24 h (missing "all clear" messages) are capped at 24 h.
+
+## 1. Problem framing
+At the end of every hour `T`, for every region, predict P(an alert is active at any moment of
+hour `[T+h-1, T+h)`) for `h ∈ {1, 3, 6, 12, 24}`.
+- Alerts are rasterised to a minute-level on/off matrix. This is exactly the information a
+  real-time observer has: at time `T` they know which sirens were on, but **not** when an
+  ongoing alert will end. Features only aggregate rows `≤ T`.
+- `tests/test_leakage.py` cuts the alert log at a moment `C` (drops later alerts, truncates
+  running ones at `C`) and checks every feature for origins `≤ C` is bit-identical to the
+  full-history version.
+- A second, subtler leak: a training row with origin before the test start but **target**
+  after it (e.g. `h = 24` made 5 h before the cut-off). `train_mask` requires the target hour
+  to end before the cut-off.
+
+## 2. Baselines (validation)
+| model | h=1 | h=6 | h=24 |
+|---|---|---|---|
+| persistence (state now) | 0.190 | 0.314 | 0.313 |
+| same hour yesterday | 0.319 | 0.319 | 0.323 |
+| climatology: 28-day rate at that hour of day | 0.171 | 0.171 | 0.174 |
+
+Persistence and "yesterday" are hard 0/1 forecasts → terrible Brier/log-loss.
+Climatology is the baseline to beat.
+
+## 3. First attempt — logistic regression (v1)
+Own-region lags + `h` as a numeric feature, trained on everything since mid-2023.
+- h=1: 0.150 (beats climatology), **h≥3: 0.172–0.176 — worse than climatology.**
+- What went wrong: (a) a linear model cannot express "recent state matters for h=1 but
+  not for h=24" when `h` is just another additive input; (b) the base rate drifted
+  (19.8 % of region-hours over the whole war vs 33 % in the last 4 weeks), and a single
+  intercept fitted on 3 years under-predicts the current regime.
+
+## 4. Gradient boosting (v2)
+LightGBM, one global model for all regions and horizons, plus neighbour-region state
+(adjacency graph of oblasts) and national context (share of regions on alert, new alerts
+in last 1–3 h).
+- h=1: 0.120, h=6: 0.166, h=24: 0.170 — beats climatology at every horizon.
+- Training window (validation, all horizons): 90 d 0.160 · 180 d 0.158 · 365 d 0.158 · all 0.157.
+  More history helps slightly even though the regime drifts.
+- Time-decay weights (half-life 90/180/365 d) vs none: differences ≤ 0.0003 — noise. Kept
+  180 d half-life as a cheap hedge against drift.
+- Per-horizon models (5 separate boosters) were **worse** (0.1605 vs 0.1597): the shared
+  model pools information across horizons.
+- **Extra "regime" features made it worse** (0.1597 vs 0.1576): national 7-day level,
+  hours since last massive attack (≥ 60 % of regions), 7d-vs-28d trend, neighbours'
+  seasonal lags. They let the model memorise past regimes that do not repeat.
+  They stay in the feature table but are not used by the model.
+- Region ID as a categorical: no change (the 28-day rate already encodes the region).
+
+## 5. Test (walk-forward, weekly refit) and a sobering finding
+| model | all origins h=1 | h=6 | quiet origins h=1 | h=6 |
+|---|---|---|---|---|
+| climatology | 0.184 | 0.185 | 0.160 | 0.177 |
+| logreg v1 | 0.163 | 0.187 | 0.153 | 0.178 |
+| LightGBM v2 | **0.131** | **0.179** | **0.147** | **0.172** |
+
+Calibration of v2 is close to the diagonal at every horizon.
+
+**What went wrong:** the impressive +29 % skill at h=1 comes mostly from alerts that are
+*already running* (an alert in progress will probably still be on in an hour). Looking only
+at "quiet" origins — where the real question is *will a new alert start?* — skill falls to
++8 %. The alert history alone carries little information about the next attack; beyond 3 h
+everything collapses to ≈ climatology (+2–3 %).
+
+This motivates the optional text data: Air Force / monitoring Telegram channels announce
+launches and drone directions before sirens are switched on.

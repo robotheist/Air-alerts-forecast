@@ -1,0 +1,10 @@
+# data is downloaded / rebuilt by scripts
+data/raw/*
+data/processed/*
+!data/**/.gitkeep
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+.DS_Store
+.pytest_cache/
