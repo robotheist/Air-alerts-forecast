@@ -84,7 +84,8 @@ def test_text_features_do_not_see_the_future():
     texts = ["🛵 Групи БпЛА на півночі Сумщини", "На Київ", "Ракети на Харків",
              "🏍 Реактивний БпЛА на Теплик", "Загроза балістики з півдня"]
     times = start + pd.to_timedelta(np.sort(rng.uniform(0, 9 * 24 * 60, 3000)), unit="min")
-    posts = pd.DataFrame({"published_at": times, "text": rng.choice(texts, len(times))})
+    posts = pd.DataFrame({"published_at": times.as_unit("us"),  # real data is parsed as us
+                          "text": rng.choice(texts, len(times))})
     gaz = {"теплик": "Vinnytska oblast"}
 
     def feats(ps):
@@ -92,6 +93,8 @@ def test_text_features_do_not_see_the_future():
         return tf.text_feature_arrays(p, ps, m, th)
 
     full = feats(posts)
+    # sanity: counts must be plausible (~3000 posts over 9 days -> ~14 per hour)
+    assert 5 < np.nanmean(full["tg_posts_60m"]) < 30
     cut_row = 100
     cut = p.index[cut_row] + pd.Timedelta(hours=1)          # origin of row 100
     known = feats(posts[posts.published_at < cut])

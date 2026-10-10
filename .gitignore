@@ -2,6 +2,8 @@
 data/raw/*
 data/processed/*
 !data/**/.gitkeep
+# the scraped Telegram posts are versioned for reproducibility (public channel)
+!data/raw/telegram_kpszsu.csv
 __pycache__/
 *.pyc
 .venv/

@@ -84,8 +84,10 @@ def skill_by_horizon(table: pd.DataFrame, quiet_table: pd.DataFrame,
             g = t[t.model == m].set_index("h").sort_index()
             bss = 1 - g.brier / ref_b.loc[g.index]
             ax.plot(g.index, bss, marker="o", ms=5, color=MODEL_COLORS[m], label=m)
-            ax.annotate(f"{bss.iloc[0]:+.0%}", (g.index[0], bss.iloc[0]),
-                        xytext=(6, 4), textcoords="offset points", color=INK2, fontsize=8)
+            if m in (models[0], models[-1]):  # label first & last only, avoids overlap
+                dy = 6 if m == models[-1] else -12
+                ax.annotate(f"{bss.iloc[0]:+.1%}", (g.index[0], bss.iloc[0]),
+                            xytext=(8, dy), textcoords="offset points", color=INK2, fontsize=8)
         ax.axhline(0, color=INK2, lw=0.8)
         ax.set_title(title, fontsize=10)
         ax.set_xscale("log")
@@ -128,7 +130,7 @@ def example_timeline(df: pd.DataFrame, cols: list[str], region: str, h: int, day
     ax.set_ylim(0, 1.02)
     ax.set_ylabel("P(alert)")
     ax.set_title(f"{region}: forecast {h} h ahead vs. what happened (last {days} days of test)")
-    ax.legend(loc="upper left", ncols=3)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncols=3)
     _save(fig, name)
 
 
@@ -139,4 +141,24 @@ def importance_plot(imp: pd.Series, top=15, name="06_feature_importance.png"):
     ax.set_xlabel("share of total gain")
     ax.set_title("What the model relies on (LightGBM gain)")
     ax.grid(axis="y", visible=False)
+    _save(fig, name)
+
+
+def lead_time_plot(leads: np.ndarray, summary: pd.DataFrame, name="07_text_lead_time.png"):
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.6))
+    ax = axes[0]
+    ax.hist(leads[leads <= 120], bins=np.arange(0, 125, 5), color=C[0], rwidth=0.9)
+    ax.set_xlabel("minutes from the last channel mention to the siren")
+    ax.set_ylabel("alert onsets")
+    ax.set_title("How early does @kpszsu mention the region?", fontsize=10)
+    ax = axes[1]
+    x = np.arange(len(summary))
+    ax.bar(x - 0.2, summary.share_onsets_with_mention, 0.38, color=C[0], label="before an alert onset")
+    ax.bar(x + 0.2, summary.share_random_moments_with_mention, 0.38, color=C[1],
+           label="at a random moment")
+    ax.set_xticks(x, [f"{w} min" for w in summary.window_min])
+    ax.set_ylabel("share with a mention in the window")
+    ax.set_title("Region mentioned in the preceding window", fontsize=10)
+    ax.legend(loc="upper left")
+    ax.grid(axis="x", visible=False)
     _save(fig, name)

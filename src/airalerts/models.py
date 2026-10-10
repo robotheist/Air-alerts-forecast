@@ -73,7 +73,7 @@ V2_FEATURES = [
 TEXT_FEATURES = [
     "tg_reg_30m", "tg_reg_60m", "tg_reg_180m", "tg_reg_since_min", "tg_nb_60m",
     "tg_posts_60m", "tg_posts_180m",
-    *[f"tg_{k}_{w}m" for k in ("drone", "jet", "missile", "ballistic", "kab", "aviation", "launch")
+    *[f"tg_{k}_{w}m" for k in ("drone", "jet", "missile", "ballistic", "kab", "aviation", "launch", "allclear")
       for w in (60, 360)],
 ]
 V3_FEATURES = V2_FEATURES + TEXT_FEATURES

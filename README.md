@@ -16,19 +16,41 @@ Brier score (mean squared error of the probability, lower is better):
 | persistence (current state continues) | 0.210 | 0.336 | 0.338 | 0.346 | 0.338 |
 | climatology (28-day rate at that hour of day) | 0.184 | 0.184 | 0.185 | 0.184 | 0.183 |
 | v1: logistic regression | 0.163 | 0.186 | 0.187 | 0.188 | 0.187 |
-| **v2: LightGBM + neighbours + national context** | **0.131** | **0.177** | **0.179** | **0.180** | **0.180** |
+| v2: LightGBM + neighbours + national context | 0.131 | 0.177 | 0.179 | 0.180 | 0.180 |
+| v2, trained only on the Telegram-covered year | 0.131 | 0.178 | 0.179 | 0.180 | 0.180 |
+| **v3: v2 + Telegram (@kpszsu) text features** | **0.130** | **0.177** | 0.179 | 0.180 | 0.180 |
 
-ROC-AUC of v2: 0.86 (h = 1), 0.76–0.77 (h = 3…24). The probabilities are well calibrated
+ROC-AUC of v3: 0.86 at h = 1 and 0.76–0.77 at h = 3…24. The probabilities are well calibrated
 (`reports/figures/04_reliability.png`).
 
-**Honest caveat.** Most of the h = 1 skill comes from alerts that are already running.
-Restricted to moments with *no* alert in progress (i.e. predicting a **new** alert),
-v2 beats climatology by only 8 % at h = 1 and by 2–3 % at longer horizons
-(`reports/metrics/test_scores_quiet_origins.csv`). The alert history alone says little about
-when the next attack starts. See [`docs/experiment_log.md`](docs/experiment_log.md) for the full story.
+**What the numbers say**
+
+* Most of the h = 1 skill comes from alerts that are already running. Restricted to moments with
+  *no* alert in progress (i.e. predicting a **new** alert), the models beat climatology by ~9 % at
+  h = 1 and by 2–3 % at longer horizons (`reports/metrics/test_scores_quiet_origins.csv`).
+* The Air Force Telegram channel does mention a region before its siren more often than by chance:
+  32 % of onsets have a mention in the preceding 30 min, vs 18 % of random moments
+  (`reports/figures/07_text_lead_time.png`). Adding it (v3) improved validation Brier at h = 1 by 2.4 %.
+  On the test month the gain shrank to 0.4 % at h = 1–3 h and is not clearly significant
+  (day-block bootstrap, `reports/metrics/significance_v3_vs_v2.csv`). The alert history already
+  carries most of that information, and the channel's lead time is minutes, not hours.
+
+The full story of what was tried and what failed is in [`docs/experiment_log.md`](docs/experiment_log.md).
 
 ![skill](reports/figures/03_skill_by_horizon.png)
+![lead time](reports/figures/07_text_lead_time.png)
 ![timeline](reports/figures/05_example_timeline.png)
+
+## Data
+
+* **Alerts**: [Vadimkin/ukrainian-air-raid-sirens-dataset](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset),
+  volunteer (eTryvoga) log at oblast level, downloaded by `scripts/01_download_data.py`.
+* **Telegram**: 41k public posts of [@kpszsu](https://t.me/s/kpszsu) (Air Force of the Armed Forces of
+  Ukraine), 01.10.2025–10.10.2026, in `data/raw/telegram_kpszsu.csv`. Collected with
+  `scripts/00_scrape_telegram.py` (Python) or `scripts/browser_scraper.js` (browser console, used here
+  because t.me was not reachable from the sandbox).
+* **Gazetteer**: settlement → oblast from the official KATOTTG catalogue via
+  [0G3RA/ua-geo-set](https://github.com/0G3RA/ua-geo-set) (MIT), in `data/external/gazetteer.csv`.
 
 ## How leakage is prevented
 
@@ -36,6 +58,8 @@ when the next attack starts. See [`docs/experiment_log.md`](docs/experiment_log.
   uses only minutes before `T`. The end time of an alert still running at `T` is never used.
 * `tests/test_leakage.py` erases everything after a cut-off (drops later alerts and truncates
   running ones). It then checks that every feature for origins before the cut-off is unchanged.
+  The same test is applied to the text features: a post published at or after the forecast moment
+  must not change them.
 * Training rows must have their **target** hour (not just the origin) finish before the
   evaluation period starts. Otherwise long horizons would leak test labels.
 * Splits are strictly chronological: train, then validation (model choices), then test.
@@ -49,19 +73,24 @@ air-alerts-forecast/
 │   ├── config.py           # paths, regions, oblast adjacency graph, horizons
 │   ├── data.py             # download, cleaning, minute → hourly panel
 │   ├── features.py         # leakage-safe features + (origin, region, horizon) table
-│   ├── models.py           # baselines, logistic regression (v1), LightGBM (v2)
+│   ├── text_features.py    # Telegram: gazetteer, region/threat extraction, text features
+│   ├── models.py           # baselines, logistic regression (v1), LightGBM (v2, v3)
 │   ├── evaluation.py       # chronological splits, metrics, calibration
 │   └── plots.py            # report figures
 ├── scripts/
-│   ├── 00_scrape_telegram.py   # optional: public Telegram channel → CSV
+│   ├── 00_scrape_telegram.py   # public Telegram channel → CSV (Python)
+│   ├── browser_scraper.js      # same, from a browser console
+│   ├── 00_merge_browser_parts.py
 │   ├── 01_download_data.py
 │   ├── 02_build_dataset.py
 │   ├── 03_train_evaluate.py    # walk-forward test, metrics, figures
-│   └── 04_forecast_now.py      # forecast from the latest hour
+│   ├── 04_forecast_now.py      # forecast from the latest hour
+│   ├── 05_text_lead_time.py    # does the channel speak before the siren?
+│   └── 06_significance.py      # bootstrap test v3 vs v2
 ├── tests/test_leakage.py
 ├── reports/{metrics,figures}/  # generated results
 ├── docs/experiment_log.md      # what was tried, what failed, why
-└── data/{raw,processed}/       # generated, not tracked by git
+└── data/{raw,processed,external}/
 ```
 
 ## Run
@@ -72,7 +101,9 @@ pip install -r requirements.txt
 python scripts/01_download_data.py
 python scripts/02_build_dataset.py
 python -m pytest -q                  # leakage tests
-python scripts/03_train_evaluate.py  # ~5 min on a laptop
+python scripts/03_train_evaluate.py  # ~8 min on a laptop
+python scripts/05_text_lead_time.py
+python scripts/06_significance.py
 python scripts/04_forecast_now.py
 ```
 
@@ -83,3 +114,6 @@ python scripts/04_forecast_now.py
 * The newest few hours of the log can be incomplete because alerts are published after they end.
   A 1-hour margin is dropped at the edge.
 * Alerts with a missing "all clear" message are capped at 24 h, and naive ones are assumed to last 30 min.
+* Telegram posts can be edited after publication. The web preview shows the final text, while the
+  timestamp is the original publication time, so a small leak through edits cannot be fully excluded.
+* Text features exist only from October 2025, so v3 is trained on one year of data, not three.

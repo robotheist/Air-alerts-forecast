@@ -42,21 +42,29 @@ OBLAST_UA = {  # KATOTTG level-1 name -> dataset region
     "Чернігівська": "Chernihivska oblast",
 }
 
+# Kyiv city districts and neighbourhoods often appear alone ("Оболонь!", "На Теремки")
+KYIV_DISTRICTS = (r"оболон|деміїв|теремк|святошин|сирц|сирець|дарниц|солом.янк|шулявк|академмістеч|"
+                  r"жулян|біличі|русанівськ|березняк|берковец|совки|борщагів|троєщин|позняк|осокорк|"
+                  r"виноградар|лук.янівк|печерськ|поділ|відрадн|нивк|бортнич|голосі|лісов\w* масив|"
+                  r"харківськ\w* масив|лівобереж|правобереж|вітряні гори|кур.янівк|караваєві дачі|"
+                  r"нові будинки|китаїв|чоколів|звіринец|сінн\w* площ|майдан незалежн|биківн|теличк|"
+                  r"пирогів|пирогов|мишоловк|віта-литовськ|липки|липках|феофаній|бессарабк|хрещатик")
+
 # Explicit region names: oblast adjective, colloquial "-щина", regional centre.
 REGION_PATTERNS = {
-    "Vinnytska oblast": r"вінниц|вінниччин",
+    "Vinnytska oblast": r"вінниц|вінниччин|вінничин",
     "Volynska oblast": r"волин|луцьк",
-    "Dnipropetrovska oblast": r"дніпропетров|дніпр[оаіу]\b|дніпрі\b|кривий ріг|кривого рогу|кривому розі|криворіж|павлоград|нікопол",
+    "Dnipropetrovska oblast": r"дніпропетр|дніпр[оаіу]\b|дніпрі\b|кривий ріг|кривого рогу|кривому розі|криворіж|павлоград|нікопол",
     "Donetska oblast": r"донеччин|донецьк|краматорськ|слов.янськ|покровськ|дружківк|костянтинівк",
     "Zhytomyrska oblast": r"житомир|коростен|бердич",
     "Zakarpatska oblast": r"закарпат|ужгород|мукачев",
     "Zaporizka oblast": r"запоріж|запорізьк",
     "Ivano-Frankivska oblast": r"франків|прикарпат",
-    "Kyivska oblast": r"київщин|київськ\w* обл|київськ\w* област",
-    "Kyiv City": r"\bкиїв\b|\bкиєв[аіу]\b|столиц",
-    "Kirovohradska oblast": r"кіровоград|кропивницьк",
+    "Kyivska oblast": r"київщин|київськ",
+    "Kyiv City": r"\bкиїв\b|\bкиєв[аіу]\b|\bкиєвом\b|столиц|" + KYIV_DISTRICTS,
+    "Kirovohradska oblast": r"кіровогра|кропивницьк",
     "Lvivska oblast": r"львів",
-    "Mykolaivska oblast": r"миколаїв",
+    "Mykolaivska oblast": r"миколаїв|миколаєв",
     "Odeska oblast": r"одес|одещин|ізмаїл",
     "Poltavska oblast": r"полтав|кременчу|миргород",
     "Rivnenska oblast": r"рівненськ|рівненщин|\bрівне\b|\bрівного\b",
@@ -64,10 +72,10 @@ REGION_PATTERNS = {
     "Ternopilska oblast": r"тернопіл|тернопол",
     "Kharkivska oblast": r"харків|ізюм|куп.янськ|чугу",
     "Khersonska oblast": r"херсон",
-    "Khmelnytska oblast": r"хмельниц|хмельниччин|кам.янець-подільськ|старокостянтин",
+    "Khmelnytska oblast": r"хмельниц|хмельниччин|кам.янець.подільськ|старокостянтин",
     "Cherkaska oblast": r"черкас|черкащин|умань|умані",
     "Chernivetska oblast": r"чернівц|буковин",
-    "Chernihivska oblast": r"чернігів|ніжин|прилук",
+    "Chernihivska oblast": r"черніг|ніжин|прилук",
 }
 REGION_RE = {r: re.compile(p) for r, p in REGION_PATTERNS.items()}
 
@@ -79,11 +87,14 @@ THREATS = {
     "kab": r"\bкаб|керован\w* авіабомб",
     "aviation": r"ту-95|ту-160|ту-22|міг-31|миг-31|стратегічн|тактичн\w* авіац|су-34|су-35",
     "launch": r"пуск|зліт|злет",
+    "allclear": r"відбій",
 }
 THREAT_RE = {k: re.compile(p) for k, p in THREATS.items()}
 
 PREPOSITIONS = {"на", "в", "у", "до", "з", "із", "зі", "біля", "повз", "через", "напрямку",
-                "бік", "районі", "району", "над", "від", "курсом", "околиці", "околицях"}
+                "бік", "районі", "району", "над", "від", "курсом", "курс", "околиці", "околицях",
+                "південніше", "північніше", "західніше", "східніше", "поблизу",
+                "п"}  # "н.п.Знам'янка" -> [..., "н", "п", "Знам'янка"]
 WORD_RE = re.compile(r"[А-ЯІЇЄҐа-яіїєґ'’ʼ-]+")
 
 
@@ -104,15 +115,23 @@ def _forms(word: str) -> set[str]:
         f |= {w[:-2] + "ого", w[:-2] + "ому"}
     elif w.endswith("и"):
         f |= {w[:-1], w[:-1] + "ів", w[:-1] + "ах"}
+    elif w.endswith("їв"):
+        f |= {w[:-2] + "єва", w[:-2] + "єві", w[:-2] + "євом"}
     elif w.endswith("ів"):
-        f |= {w[:-2] + "ова", w[:-2] + "ові", w[:-2] + "еві"}
+        f |= {w[:-2] + "ова", w[:-2] + "ові", w[:-2] + "еві", w[:-2] + "овом"}
     elif w.endswith(("іль", "іл")):
         stem = w[: -3 if w.endswith("іль") else -2]
         f |= {stem + "оля", stem + "олі"}
+    elif w.endswith("ець"):
+        f |= {w[:-3] + "ця", w[:-3] + "цю", w[:-3] + "ці", w[:-3] + "цем"}
     elif w.endswith("ь"):
-        f |= {w[:-1] + "я", w[:-1] + "і"}
+        f |= {w[:-1] + "я", w[:-1] + "і", w[:-1] + "ем"}
     elif w[-1:].isalpha():
-        f |= {w + "а", w + "у", w + "і"}
+        f |= {w + "а", w + "у", w + "і", w + "ом"}
+    if w.endswith("а"):
+        f.add(w[:-1] + "ою")
+    elif w.endswith("я"):
+        f |= {w[:-1] + "ею", w[:-1] + "єю"}
     return f
 
 
@@ -156,11 +175,21 @@ def build_gazetteer(path=GAZETTEER_CSV) -> pd.DataFrame:
 
 def load_gazetteer(path=GAZETTEER_CSV) -> dict[str, str]:
     g = pd.read_csv(path) if path.exists() else build_gazetteer(path)
-    forms: dict[str, set[str]] = defaultdict(set)
-    for name, region in zip(g.name, g.region):
+    # form -> {(priority, region)}; an exact (nominative) name beats a generated
+    # case form of another name, then a bigger settlement beats a smaller one.
+    forms: dict[str, set[tuple[int, str]]] = defaultdict(set)
+    for name, region, rank in zip(g.name, g.region, g["rank"]):
+        nom = _norm(name).lower()
         for f in _phrase_forms(_norm(name)):
-            forms[f.lower()].add(region)
-    return {f: next(iter(rs)) for f, rs in forms.items() if len(rs) == 1}
+            f = f.lower()
+            forms[f].add((10 * (f == nom) + int(rank), region))
+    out = {}
+    for f, cands in forms.items():
+        top = max(c[0] for c in cands)
+        regions = {r for pr, r in cands if pr == top}
+        if len(regions) == 1:
+            out[f] = regions.pop()
+    return out
 
 
 def _norm(s: str) -> str:
@@ -179,7 +208,9 @@ def extract(posts: pd.DataFrame, gaz: dict[str, str]) -> tuple[pd.DataFrame, pd.
             mentions.append((t, r, "region"))
         words = WORD_RE.findall(text)
         for k, wd in enumerate(words):
-            if not wd[:1].isupper() or k == 0 or words[k - 1].lower() not in PREPOSITIONS:
+            # a settlement name follows a preposition, or *is* the whole short post ("Боярка.")
+            standalone = k == 0 and len(words) <= 3
+            if not wd[:1].isupper() or not (standalone or k > 0 and words[k - 1].lower() in PREPOSITIONS):
                 continue
             for n in (3, 2, 1):
                 phrase = " ".join(words[k:k + n]).lower()
@@ -202,8 +233,16 @@ def load_posts(channel="kpszsu") -> pd.DataFrame:
 
 
 # ----------------------------------------------------------------- features
-WINDOWS_MIN = (30, 60, 180)
+WINDOWS_MIN = (10, 30, 60, 180)
 THREAT_WINDOWS_MIN = (60, 360)
+
+
+def to_ns(t) -> np.ndarray:
+    """Timestamps -> int64 nanoseconds, whatever the stored resolution (pandas 3
+    parses to microseconds by default, so a bare ``astype("int64")`` is unit-dependent)."""
+    if isinstance(t, pd.Series):
+        return t.dt.as_unit("ns").astype("int64").to_numpy()
+    return pd.DatetimeIndex(t).as_unit("ns").asi8
 
 
 def _window_counts(times: np.ndarray, origins: np.ndarray, w_min: int) -> np.ndarray:
@@ -218,14 +257,14 @@ def text_feature_arrays(p: HourlyPanel, posts: pd.DataFrame, mentions: pd.DataFr
     """(T, R) arrays aligned with panel rows; origin of row i is index[i] + 1h.
 
     Rows before the first scraped post are NaN (no text available yet)."""
-    origins = (p.index + pd.Timedelta(hours=1)).asi8
+    origins = to_ns(p.index + pd.Timedelta(hours=1))
     T, R = len(origins), len(p.regions)
     first_post = posts.published_at.min().value
     valid = origins >= first_post + 6 * 3600 * 10**9  # 6 h warm-up for the windows
     f: dict[str, np.ndarray] = {}
 
-    per_region = {r: np.sort(mentions.loc[mentions.region == r, "published_at"].astype("int64")
-                             .to_numpy()) for r in p.regions}
+    per_region = {r: np.sort(to_ns(mentions.loc[mentions.region == r, "published_at"]))
+                  for r in p.regions}
     for w in WINDOWS_MIN:
         a = np.zeros((T, R), np.float32)
         for j, r in enumerate(p.regions):
@@ -249,13 +288,14 @@ def text_feature_arrays(p: HourlyPanel, posts: pd.DataFrame, mentions: pd.DataFr
         for n in ns:
             W[idx[r], idx[n]] = 1.0
     W /= W.sum(axis=1, keepdims=True)
+    f["tg_nb_30m"] = f["tg_reg_30m"] @ W.T
     f["tg_nb_60m"] = f["tg_reg_60m"] @ W.T
 
-    all_times = np.sort(posts.published_at.astype("int64").to_numpy())
+    all_times = np.sort(to_ns(posts.published_at))
     for w in (60, 180):
         f[f"tg_posts_{w}m"] = np.repeat(_window_counts(all_times, origins, w)[:, None], R, axis=1)
     for k in THREATS:
-        times = np.sort(threats.loc[threats[k] == 1, "published_at"].astype("int64").to_numpy())
+        times = np.sort(to_ns(threats.loc[threats[k] == 1, "published_at"]))
         for w in THREAT_WINDOWS_MIN:
             f[f"tg_{k}_{w}m"] = np.repeat(_window_counts(times, origins, w)[:, None], R, axis=1)
 
