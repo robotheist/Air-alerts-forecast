@@ -2,8 +2,15 @@
 
 Chronological notes on what was tried, what failed and why the design changed.
 Numbers are Brier scores (lower is better) unless stated otherwise.
-*Validation* = 28 days before the test period (15.08–12.09.2026), *test* = last
-28 days (12.09–10.10.2026, never used for any choice).
+
+Sections 0–9 were written on the data snapshot of 10.10.2026: *validation* = 15.08–12.09,
+*test* = 12.09–10.10. The exploratory validation numbers in §2–4 and §9 came from a single fit at the
+start of the validation month. Sections 10–11 cover an independent code review, the fixes, and the
+final run on the snapshot of 12.10.2026 (validation 17.08–14.09, test 14.09–12.10), where validation
+uses the same weekly walk-forward as the test (`scripts/03a_validate.py`).
+
+The test month was looked at twice: first for v1/v2 (§5), then for v3. The v2 test result motivated
+adding text. Features and hyper-parameters were never tuned on test numbers.
 
 ## 0. Data choice
 - Two sources in [Vadimkin/ukrainian-air-raid-sirens-dataset](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset):
@@ -21,8 +28,8 @@ hour `[T+h-1, T+h)`) for `h ∈ {1, 3, 6, 12, 24}`.
   real-time observer has: at time `T` they know which sirens were on, but **not** when an
   ongoing alert will end. Features only aggregate rows `≤ T`.
 - `tests/test_leakage.py` cuts the alert log at a moment `C` (drops later alerts, truncates
-  running ones at `C`) and checks every feature for origins `≤ C` is bit-identical to the
-  full-history version.
+  running ones at `C`) and checks every feature for origins `≤ C` equals the full-history
+  version (tolerance 1e-5; the reviewer measured a maximum difference of exactly 0).
 - A second, subtler leak: a training row with origin before the test start but **target**
   after it (e.g. `h = 24` made 5 h before the cut-off). `train_mask` requires the target hour
   to end before the cut-off.
@@ -30,7 +37,7 @@ hour `[T+h-1, T+h)`) for `h ∈ {1, 3, 6, 12, 24}`.
 ## 2. Baselines (validation)
 | model | h=1 | h=6 | h=24 |
 |---|---|---|---|
-| persistence (state now) | 0.190 | 0.314 | 0.313 |
+| persistence (state now) | 0.191 | 0.314 | 0.313 |
 | same hour yesterday | 0.319 | 0.319 | 0.323 |
 | climatology: 28-day rate at that hour of day | 0.171 | 0.171 | 0.174 |
 
@@ -143,3 +150,50 @@ borderline-significant on the test month. Why it is small:
    which shifts the count features.
 
 A 10–15-minute target or per-post direction parsing ("курсом на захід") are the natural next steps.
+
+## 10. Independent review (12.10.2026) and fixes
+A separate reviewer agent, which had not seen the code being written, re-checked the repository.
+It found **no leakage**:
+- 20k sampled rows re-aligned against the panel;
+- extra random cut-offs at second precision (maximum feature difference 0.0);
+- text features recomputed from raw posts (0 mismatches);
+- metrics recomputed from the saved predictions (match to 2e-16);
+- block 1 retrained bit-identically.
+
+It did find real defects:
+
+| finding | effect | fix |
+|---|---|---|
+| **Gazetteer false matches**: "Харківщині" matched the *village* Харківщина (Sumy), "з Чорного моря" matched the village Чорне (Kharkiv), "Кривого Рогу" matched Криве (Zakarpattia), "Затоки" matched Vinnytsia | 22 % of Sumy mentions and 97 % of Zakarpattia mentions were false; noisy text features | settlement lookup is skipped where an oblast/city pattern already matched; stop-list for seas; о/і alternation (Ріг→Рогу); a candidate in an oblast named in the same post wins; bounded Kyiv-district patterns. Sumy −23 %, Zakarpattia −97 %, Lviv −39 % mentions; coverage of the hand-checked week unchanged (97.8 %) |
+| Origins after the last scraped post got zero text counts instead of NaN | a fresh clone with newer alerts would silently corrupt v3 | text features are NaN after the scrape time (`known_until`); tested |
+| Results depended on the moving `main` alert file | not reproducible | the alert snapshot is versioned in `data/raw/` |
+| README claimed the test month was used once | over-claim | wording fixed (see header) |
+| No script for validation numbers; validation used a single fit while test used weekly refits | undocumented protocol difference | `scripts/03a_validate.py` runs the same walk-forward |
+| 1 h edge margin: alerts running at download time are missing | ~1.4 % wrong labels in the last hour | margin 3 h |
+| Browser scraper had hard-coded ID ranges and parallel downloads | could not reproduce the CSV | auto-starts from the newest post, incremental `STOP_AT_ID`, queued downloads |
+| Rounding/wording slips in the docs | — | fixed |
+| Tuning of text rules on a week inside the test month | mild contamination | disclosed in the README |
+
+New tests: target vs raw alert intervals, NaN after the scrape range, gazetteer regressions.
+
+## 11. Final run (snapshot 12.10.2026, 41,856 posts)
+Validation (17.08–14.09, walk-forward), v2 trained on the same window vs v3:
+- h=1: 0.1233 → **0.1208** (−2.0 %); quiet h=1 0.1375 → 0.1345; ROC-AUC quiet h=1 0.795 → 0.808;
+- h=3: 0.1687 → 0.1690 (equal); h ≥ 6: v3 slightly worse (+0.3–0.4 %).
+
+Test (14.09–12.10, walk-forward) with a paired day-block bootstrap (`scripts/06_significance.py`, 2000 replicates):
+
+| horizon | v2 (same window) | v3 text | change | 95 % CI of Δ Brier | replicates with no gain |
+|---|---|---|---|---|---|
+| 1 h | 0.1324 | 0.1313 | −0.85 % | [−0.0020, −0.0002] | 0.75 % |
+| 3 h | 0.1780 | 0.1778 | −0.1 % | [−0.0009, +0.0006] | 33 % |
+| 6–24 h | 0.179–0.181 | 0.180–0.182 | +0.2 % | includes 0 | 82–85 % |
+
+With the cleaner text features the 1-hour gain doubled compared with §9 and is now statistically
+clear. It is borderline after a Bonferroni correction for the 10 comparisons (0.0075 vs 0.005).
+Longer horizons do not benefit, on validation as well as on test. **Recommended setup:** v3 for
+the next hour and v2 for 3–24 h.
+
+Lead time on the final data: a region is mentioned within 30 min before 32 % of onsets vs 17 % of random
+moments (lift 1.9); within 5 min, 13 % vs 3 % (lift 3.8). 5 % of onsets have a mention less than
+1 minute earlier, so part of this "lead" may be simultaneous reporting.

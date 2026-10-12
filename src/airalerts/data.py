@@ -16,6 +16,7 @@ from . import config
 
 # Alerts longer than this are almost always missing "all clear" messages.
 MAX_ALERT_MINUTES = 24 * 60
+EDGE_MARGIN_H = 3
 
 
 def download(url: str = config.DATASET_URL, dest=config.RAW_CSV) -> None:
@@ -55,8 +56,9 @@ class HourlyPanel:
 def build_panel(alerts: pd.DataFrame, end: pd.Timestamp | None = None) -> HourlyPanel:
     start = alerts["started_at"].min().floor("h")
     if end is None:
-        # Alerts are published once they end; keep a 1h safety margin at the edge.
-        end = alerts["finished_at"].max().floor("h") - pd.Timedelta(hours=1)
+        # Alerts are published once they end, so alerts still running at download time
+        # are missing; drop a 3 h safety margin at the edge.
+        end = alerts["finished_at"].max().floor("h") - pd.Timedelta(hours=EDGE_MARGIN_H)
     n_min = int((end - start).total_seconds() // 60)
     n_hours = n_min // 60
     n_min = n_hours * 60

@@ -4,6 +4,8 @@ data/processed/*
 !data/**/.gitkeep
 # the scraped Telegram posts are versioned for reproducibility (public channel)
 !data/raw/telegram_kpszsu.csv
+# snapshot of the alert log used for the reported results (refresh: scripts/01)
+!data/raw/volunteer_data_en.csv
 __pycache__/
 *.pyc
 .venv/

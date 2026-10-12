@@ -88,20 +88,77 @@ def test_text_features_do_not_see_the_future():
                           "text": rng.choice(texts, len(times))})
     gaz = {"теплик": "Vinnytska oblast"}
 
-    def feats(ps):
+    def feats(ps, known_until=None):
         m, th = tf.extract(ps, gaz)
-        return tf.text_feature_arrays(p, ps, m, th)
+        return tf.text_feature_arrays(p, ps, m, th, known_until=known_until)
 
     full = feats(posts)
     # sanity: counts must be plausible (~3000 posts over 9 days -> ~14 per hour)
     assert 5 < np.nanmean(full["tg_posts_60m"]) < 30
     cut_row = 100
     cut = p.index[cut_row] + pd.Timedelta(hours=1)          # origin of row 100
-    known = feats(posts[posts.published_at < cut])
+    known = feats(posts[posts.published_at < cut], known_until=cut)  # scraped at moment `cut`
     for k in full:
         np.testing.assert_array_equal(full[k][: cut_row + 1], known[k][: cut_row + 1], err_msg=k)
     # a post exactly at the origin time is NOT visible to that origin
     edge = pd.concat([posts[posts.published_at < cut],
                       pd.DataFrame({"published_at": [cut], "text": ["Ракети на Харків"]})])
-    e = feats(edge)
+    e = feats(edge, known_until=cut)
     np.testing.assert_array_equal(e["tg_missile_60m"][cut_row], known["tg_missile_60m"][cut_row])
+
+
+def test_target_matches_raw_intervals(alerts):
+    """y must equal 'some raw alert interval overlaps the target hour' (independent check)."""
+    p = data.build_panel(alerts)
+    d = features.build_dataset(p, horizons=(1, 6, 24))
+    d = d[d.y.notna()].sample(3000, random_state=0)
+    for row in d.itertuples():
+        a = row.target_time
+        b = a + pd.Timedelta(hours=1)
+        g = alerts[alerts.region == row.region]
+        hit = ((g.started_at < b) & (g.finished_at > a)).any()
+        assert int(hit) == int(row.y), (row.region, a)
+
+
+def test_text_features_are_nan_outside_scraped_range():
+    """Origins after the last scraped post must not get fake zero counts."""
+    from airalerts import text_features as tf
+
+    alerts = _synthetic_alerts(days=6)
+    p = data.build_panel(alerts)
+    t0 = p.index[48]
+    times = t0 + pd.to_timedelta(np.arange(0, 48 * 60, 7), unit="min")
+    posts = pd.DataFrame({"published_at": times, "text": "На Київ"})
+    m, th = tf.extract(posts, {})
+    f = tf.text_feature_arrays(p, posts, m, th)
+    origins = p.index + pd.Timedelta(hours=1)
+    after = origins > posts.published_at.max()
+    before = origins < posts.published_at.min() + pd.Timedelta(hours=6)
+    inside = ~after & ~before
+    assert np.isnan(f["tg_posts_60m"][after]).all()
+    assert np.isnan(f["tg_posts_60m"][before]).all()
+    assert (f["tg_posts_60m"][inside] > 0).all()
+
+
+def test_gazetteer_regressions():
+    """Known false matches found in review must stay fixed (oblast names are not villages)."""
+    from airalerts import text_features as tf
+
+    if not tf.GAZETTEER_CSV.exists():
+        pytest.skip("gazetteer not built")
+    gaz = tf.load_gazetteer()
+    cases = {
+        "БпЛА на Харківщині курсом на н.п.Чугуїв": {"Kharkivska oblast"},
+        "Ракети з Чорного моря на Одесу": {"Odeska oblast"},
+        "Реактивний БпЛА в районі Кривого Рогу": {"Dnipropetrovska oblast"},
+        "БпЛА на півночі Харківщини, курсом на Золочів": {"Kharkivska oblast"},
+        "На Козин": {"Kyivska oblast"},
+        "Кам'янець-Подільський: БпЛА в напрямку міста": {"Khmelnytska oblast"},
+        "На Нивки.": {"Kyiv City"},
+    }
+    posts = pd.DataFrame({"published_at": pd.date_range("2026-01-01", periods=len(cases),
+                                                        freq="min", tz="UTC"),
+                          "text": list(cases)})
+    m, _ = tf.extract(posts, gaz)
+    for t, expected in zip(posts.published_at, cases.values()):
+        assert set(m.loc[m.published_at == t, "region"]) == expected

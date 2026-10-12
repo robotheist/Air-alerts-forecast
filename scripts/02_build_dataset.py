@@ -13,6 +13,7 @@ ORIGIN_START = pd.Timestamp("2023-06-01", tz="UTC")
 CHANNEL = "kpszsu"
 
 if __name__ == "__main__":
+    config.DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
     panel = data.build_panel(data.load_alerts())
     extra = None
     if (config.DATA_RAW / f"telegram_{CHANNEL}.csv").exists():
@@ -25,7 +26,6 @@ if __name__ == "__main__":
               f"region mentions per post: {share.round(2).to_dict()}")
         mentions.to_parquet(config.DATA_PROCESSED / "telegram_mentions.parquet")
     df = features.build_dataset(panel, origin_start=ORIGIN_START, extra=extra)
-    config.DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
     df.to_parquet(config.DATA_PROCESSED / "dataset.parquet")
     print(f"panel {panel.occ.shape[0]:,} hours x {len(panel.regions)} regions, "
           f"{panel.index[0]:%Y-%m-%d} .. {panel.index[-1]:%Y-%m-%d %H:%M} UTC")

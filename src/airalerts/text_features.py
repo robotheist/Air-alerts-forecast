@@ -44,10 +44,10 @@ OBLAST_UA = {  # KATOTTG level-1 name -> dataset region
 
 # Kyiv city districts and neighbourhoods often appear alone ("Оболонь!", "На Теремки")
 KYIV_DISTRICTS = (r"оболон|деміїв|теремк|святошин|сирц|сирець|дарниц|солом.янк|шулявк|академмістеч|"
-                  r"жулян|біличі|русанівськ|березняк|берковец|совки|борщагів|троєщин|позняк|осокорк|"
-                  r"виноградар|лук.янівк|печерськ|поділ|відрадн|нивк|бортнич|голосі|лісов\w* масив|"
+                  r"жулян|біличі|русанівськ|березняк|берковец|борщагів|троєщин|позняк|осокорк|"
+                  r"виноградар|лук.янівк|печерськ|\bподіл\b|\bподолі\b|відрадн|нивк|бортнич|голосіїв|голосієв|лісов\w* масив|"
                   r"харківськ\w* масив|лівобереж|правобереж|вітряні гори|кур.янівк|караваєві дачі|"
-                  r"нові будинки|китаїв|чоколів|звіринец|сінн\w* площ|майдан незалежн|биківн|теличк|"
+                  r"нові будинки|китаїв|чоколів|звіринец|сінн\w* площ|майдан незалежн|биківн|теличк|\bсовк(?:и|ах)\b|"
                   r"пирогів|пирогов|мишоловк|віта-литовськ|липки|липках|феофаній|бессарабк|хрещатик")
 
 # Explicit region names: oblast adjective, colloquial "-щина", regional centre.
@@ -65,7 +65,7 @@ REGION_PATTERNS = {
     "Kirovohradska oblast": r"кіровогра|кропивницьк",
     "Lvivska oblast": r"львів",
     "Mykolaivska oblast": r"миколаїв|миколаєв",
-    "Odeska oblast": r"одес|одещин|ізмаїл",
+    "Odeska oblast": r"одес|одещин|ізмаїл|\bзаток",
     "Poltavska oblast": r"полтав|кременчу|миргород",
     "Rivnenska oblast": r"рівненськ|рівненщин|\bрівне\b|\bрівного\b",
     "Sumska oblast": r"сумщин|сумськ|\bсуми\b|\bсумах\b|шостк|конотоп|охтирк",
@@ -96,6 +96,8 @@ PREPOSITIONS = {"на", "в", "у", "до", "з", "із", "зі", "біля", "�
                 "південніше", "північніше", "західніше", "східніше", "поблизу",
                 "п"}  # "н.п.Знам'янка" -> [..., "н", "п", "Знам'янка"]
 WORD_RE = re.compile(r"[А-ЯІЇЄҐа-яіїєґ'’ʼ-]+")
+# words that look like settlement names but in this channel mean seas, not villages
+STOP_FORMS = {"чорного", "чорному", "чорне", "чорним", "азовського", "азовському", "азовське"}
 
 
 # ----------------------------------------------------------------- gazetteer
@@ -128,6 +130,11 @@ def _forms(word: str) -> set[str]:
         f |= {w[:-1] + "я", w[:-1] + "і", w[:-1] + "ем"}
     elif w[-1:].isalpha():
         f |= {w + "а", w + "у", w + "і", w + "ом"}
+    # vowel alternation in the last closed syllable: Ріг -> Рогу, Кривий Ріг -> Кривого Рогу
+    m = re.search(r"і([^аеєиіїоуюяь']+)$", w)
+    if m and not w.endswith(("ів", "іль", "іл")):
+        alt = w[: m.start()] + "о" + m.group(1)
+        f |= {alt + "а", alt + "у", alt + "ом"}
     if w.endswith("а"):
         f.add(w[:-1] + "ою")
     elif w.endswith("я"):
@@ -148,48 +155,66 @@ def _phrase_forms(name: str) -> set[str]:
 
 
 def build_gazetteer(path=GAZETTEER_CSV) -> pd.DataFrame:
-    """Settlement name -> oblast, resolving ambiguous names by settlement rank:
-    a city (M) beats an urban-type settlement (T/X) which beats a village (C).
-    Names still shared by several oblasts at the top rank are dropped."""
+    """All settlements of the 24 regions from KATOTTG: name, region, rank
+    (city 3 > urban-type settlement 2 > village 1). Ambiguity is resolved later."""
     with urllib.request.urlopen(KATOTTG_URL, timeout=60) as r:
         items = json.load(r)["items"]
     obl = {i["level1"]: i["name"] for i in items if i["category"] == "O"}
     rank = {"M": 3, "T": 2, "X": 2, "C": 1}
-    best: dict[str, tuple[int, set[str]]] = {}
-    for i in items:
-        if i["category"] not in rank or obl.get(i["level1"]) not in OBLAST_UA:
-            continue
-        name, rk, region = i["name"], rank[i["category"]], OBLAST_UA[obl[i["level1"]]]
-        cur = best.get(name)
-        if cur is None or rk > cur[0]:
-            best[name] = (rk, {region})
-        elif rk == cur[0]:
-            cur[1].add(region)
-    rows = [(n, next(iter(rs)), rk) for n, (rk, rs) in best.items() if len(rs) == 1 and len(n) >= 4]
-    rows.append(("Київ", "Kyiv City", 4))
-    g = pd.DataFrame(rows, columns=["name", "region", "rank"]).sort_values("name")
+    rows = {(i["name"], OBLAST_UA[obl[i["level1"]]], rank[i["category"]])
+            for i in items
+            if i["category"] in rank and obl.get(i["level1"]) in OBLAST_UA and len(i["name"]) >= 4}
+    rows.add(("Київ", "Kyiv City", 4))
+    g = pd.DataFrame(sorted(rows), columns=["name", "region", "rank"])
     path.parent.mkdir(parents=True, exist_ok=True)
     g.to_csv(path, index=False)
     return g
 
 
-def load_gazetteer(path=GAZETTEER_CSV) -> dict[str, str]:
+class Gazetteer:
+    """Case form -> candidate regions with priorities.
+
+    Priority = 10 * (form is the exact nominative name) + settlement rank, so the
+    exact name beats a generated case form of another name, and a city beats a
+    village. ``lookup`` returns the region for a form, or ``None`` if it is
+    ambiguous; a candidate whose oblast is already named in the same post wins
+    ("на Харківщині ... Золочів" -> the Kharkiv Золочів, not the Lviv one).
+    """
+
+    def __init__(self, forms: dict[str, dict[str, int]]):
+        self.forms = forms
+
+    @classmethod
+    def from_mapping(cls, mapping: dict[str, str]) -> "Gazetteer":
+        return cls({f: {r: 1} for f, r in mapping.items()})
+
+    def lookup(self, form: str, context: set[str]) -> tuple[str | None, bool]:
+        """(region, is_from_context)."""
+        cands = self.forms.get(form)
+        if not cands:
+            return None, False
+        in_ctx = [r for r in cands if r in context]
+        if in_ctx:
+            return in_ctx[0], True
+        top = max(cands.values())
+        best = [r for r, pr in cands.items() if pr == top]
+        return (best[0], False) if len(best) == 1 else (None, False)
+
+    def __len__(self):
+        return len(self.forms)
+
+
+def load_gazetteer(path=GAZETTEER_CSV) -> Gazetteer:
     g = pd.read_csv(path) if path.exists() else build_gazetteer(path)
-    # form -> {(priority, region)}; an exact (nominative) name beats a generated
-    # case form of another name, then a bigger settlement beats a smaller one.
-    forms: dict[str, set[tuple[int, str]]] = defaultdict(set)
+    forms: dict[str, dict[str, int]] = defaultdict(dict)
     for name, region, rank in zip(g.name, g.region, g["rank"]):
         nom = _norm(name).lower()
         for f in _phrase_forms(_norm(name)):
             f = f.lower()
-            forms[f].add((10 * (f == nom) + int(rank), region))
-    out = {}
-    for f, cands in forms.items():
-        top = max(c[0] for c in cands)
-        regions = {r for pr, r in cands if pr == top}
-        if len(regions) == 1:
-            out[f] = regions.pop()
-    return out
+            pr = 10 * (f == nom) + int(rank)
+            if pr > forms[f].get(region, -1):
+                forms[f][region] = pr
+    return Gazetteer(dict(forms))
 
 
 def _norm(s: str) -> str:
@@ -197,26 +222,42 @@ def _norm(s: str) -> str:
 
 
 # ----------------------------------------------------------------- extraction
-def extract(posts: pd.DataFrame, gaz: dict[str, str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+def extract(posts: pd.DataFrame, gaz) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Returns (mentions: post_time, region, how) and (threats: post_time x threat flags)."""
+    if not isinstance(gaz, Gazetteer):
+        gaz = Gazetteer.from_mapping(gaz)
     mentions, threats = [], []
     for t, text in zip(posts.published_at, posts.text.fillna("")):
         text = _norm(str(text))
         low = text.lower()
-        found = {r for r, rx in REGION_RE.items() if rx.search(low)}
+        spans = []                      # character spans already explained by region names
+        found = set()
+        for r, rx in REGION_RE.items():
+            for m in rx.finditer(low):
+                spans.append((m.start(), m.end()))
+                found.add(r)
         for r in found:
             mentions.append((t, r, "region"))
-        words = WORD_RE.findall(text)
-        for k, wd in enumerate(words):
+        words = list(WORD_RE.finditer(text))
+        for k, wm in enumerate(words):
+            wd = wm.group()
             # a settlement name follows a preposition, or *is* the whole short post ("Боярка.")
             standalone = k == 0 and len(words) <= 3
-            if not wd[:1].isupper() or not (standalone or k > 0 and words[k - 1].lower() in PREPOSITIONS):
+            prev = words[k - 1].group().lower() if k > 0 else ""
+            if not wd[:1].isupper() or not (standalone or prev in PREPOSITIONS):
+                continue
+            if wd.lower() in STOP_FORMS:
                 continue
             for n in (3, 2, 1):
-                phrase = " ".join(words[k:k + n]).lower()
-                r = gaz.get(phrase)
+                chunk = words[k:k + n]
+                if len(chunk) < n:
+                    continue
+                a, b = chunk[0].start(), chunk[-1].end()
+                if any(a < e and s_ < b for s_, e in spans):
+                    continue            # overlaps "Харківщині", "Кривого Рогу", ... -> not a village
+                r, from_ctx = gaz.lookup(" ".join(c.group() for c in chunk).lower(), found)
                 if r is not None:
-                    if r not in found:
+                    if not from_ctx and r not in found:
                         mentions.append((t, r, "settlement"))
                         found.add(r)
                     break
@@ -253,14 +294,19 @@ def _window_counts(times: np.ndarray, origins: np.ndarray, w_min: int) -> np.nda
 
 
 def text_feature_arrays(p: HourlyPanel, posts: pd.DataFrame, mentions: pd.DataFrame,
-                        threats: pd.DataFrame) -> dict[str, np.ndarray]:
+                        threats: pd.DataFrame,
+                        known_until: pd.Timestamp | None = None) -> dict[str, np.ndarray]:
     """(T, R) arrays aligned with panel rows; origin of row i is index[i] + 1h.
 
-    Rows before the first scraped post are NaN (no text available yet)."""
+    Origins before the first scraped post (+6 h warm-up) or after the last one are NaN."""
     origins = to_ns(p.index + pd.Timedelta(hours=1))
     T, R = len(origins), len(p.regions)
     first_post = posts.published_at.min().value
-    valid = origins >= first_post + 6 * 3600 * 10**9  # 6 h warm-up for the windows
+    # the channel is fully scraped up to ``known_until`` (default: the last post we have)
+    last_post = (posts.published_at.max() if known_until is None else known_until).value
+    # text is "known" only between a 6 h warm-up after the first scraped post and the
+    # last scraped post; outside that range the counts would be fake zeros -> NaN
+    valid = (origins >= first_post + 6 * 3600 * 10**9) & (origins <= last_post)
     f: dict[str, np.ndarray] = {}
 
     per_region = {r: np.sort(to_ns(mentions.loc[mentions.region == r, "published_at"]))

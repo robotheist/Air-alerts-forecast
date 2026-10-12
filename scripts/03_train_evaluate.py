@@ -6,7 +6,6 @@ exactly as it would be retrained weekly in production. Baselines need no
 training. Outputs: reports/metrics/*.csv, reports/figures/*.png.
 """
 import sys
-import time
 import warnings
 from pathlib import Path
 
@@ -17,46 +16,14 @@ import pandas as pd  # noqa: E402
 
 from airalerts import config, data, evaluation as ev, models, plots  # noqa: E402
 
-REFIT_EVERY = pd.Timedelta(days=7)
-
 if __name__ == "__main__":
     df = pd.read_parquet(config.DATA_PROCESSED / "dataset.parquet")
     split = ev.make_split(df, train_days=None)
     print(f"test origins: {split.test_start:%Y-%m-%d %H:%M} .. {split.test_end:%Y-%m-%d %H:%M} UTC")
 
-    blocks, preds = [], []
-    t0 = split.test_start
-    while t0 <= split.test_end:
-        blocks.append((t0, min(t0 + REFIT_EVERY, split.test_end + pd.Timedelta(hours=1))))
-        t0 += REFIT_EVERY
-
-    # name -> (model factory, first origin allowed in training)
-    learned = {"logreg_v1": (models.LogRegModel, df.origin_time.min()),
-               "lgb_v2": (models.LGBModel, df.origin_time.min())}
-    has_text = "tg_reg_60m" in df.columns
-    if has_text:
-        text_start = df.loc[df.tg_reg_60m.notna(), "origin_time"].min()
-        print(f"telegram features available from {text_start:%Y-%m-%d %H:%M} UTC")
-        # fair comparison: v2 and v3 trained on exactly the same (shorter) window
-        learned["lgb_v2_short"] = (models.LGBModel, text_start)
-        learned["lgb_v3_text"] = (lambda: models.LGBModel(models.V3_FEATURES), text_start)
-    importances = {}
-    for start, end in blocks:
-        test = df[ev.period_mask(df, start, end)].copy()
-        for name in models.BASELINES:
-            test[name] = models.predict_baseline(test, name)
-        for name, (make, train_from) in learned.items():
-            train = df[ev.train_mask(df, train_from, start)]
-            tic = time.time()
-            m = make().fit(train)
-            test[name] = m.predict(test)
-            print(f"  block {start:%m-%d}: {name} trained on {len(train):,} rows "
-                  f"in {time.time() - tic:.0f}s")
-            if name.startswith("lgb"):
-                importances.setdefault(name, []).append(m.importance())
-        preds.append(test)
-
-    test = pd.concat(preds, ignore_index=True)
+    learned = ev.learned_models(df)
+    has_text = "lgb_v3_text" in learned
+    test, importances = ev.walk_forward(df, split.test_start, split.test_end, learned)
     names = [*models.BASELINES, *learned]
     table = ev.score_table(test, names)
     config.METRICS.mkdir(parents=True, exist_ok=True)

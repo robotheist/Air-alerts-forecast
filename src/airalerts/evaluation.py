@@ -71,3 +71,52 @@ def reliability(y: np.ndarray, p: np.ndarray, bins: int = 10) -> pd.DataFrame:
     b = np.clip(np.digitize(p, edges) - 1, 0, bins - 1)
     d = pd.DataFrame({"b": b, "y": y, "p": p})
     return d.groupby("b").agg(p_mean=("p", "mean"), y_mean=("y", "mean"), n=("y", "size"))
+
+
+def learned_models(df: pd.DataFrame) -> dict:
+    """name -> (model factory, first origin allowed in training). Shared by test and validation."""
+    from . import models
+
+    learned = {"logreg_v1": (models.LogRegModel, df.origin_time.min()),
+               "lgb_v2": (models.LGBModel, df.origin_time.min())}
+    if "tg_reg_60m" in df.columns:
+        text_start = df.loc[df.tg_reg_60m.notna(), "origin_time"].min()
+        # fair comparison: v2 and v3 trained on exactly the same (shorter) window
+        learned["lgb_v2_short"] = (models.LGBModel, text_start)
+        learned["lgb_v3_text"] = (lambda: models.LGBModel(models.V3_FEATURES), text_start)
+    return learned
+
+
+def walk_forward(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, learned: dict,
+                 refit_every: pd.Timedelta = pd.Timedelta(days=7), verbose: bool = True):
+    """Evaluate origins in [start, end] in blocks of ``refit_every``.
+
+    Before each block every learned model is re-trained on rows whose *target hour*
+    ended before the block starts (as weekly retraining would work in production).
+    Returns (predictions frame, {model name: [feature importance per block]}).
+    """
+    import time
+
+    from . import models
+
+    blocks, t0 = [], start
+    while t0 <= end:
+        blocks.append((t0, min(t0 + refit_every, end + pd.Timedelta(hours=1))))
+        t0 += refit_every
+    preds, importances = [], {}
+    for b0, b1 in blocks:
+        part = df[period_mask(df, b0, b1)].copy()
+        for name in models.BASELINES:
+            part[name] = models.predict_baseline(part, name)
+        for name, (make, train_from) in learned.items():
+            train = df[train_mask(df, train_from, b0)]
+            tic = time.time()
+            m = make().fit(train)
+            part[name] = m.predict(part)
+            if verbose:
+                print(f"  block {b0:%m-%d}: {name} trained on {len(train):,} rows "
+                      f"in {time.time() - tic:.0f}s", flush=True)
+            if hasattr(m, "importance"):
+                importances.setdefault(name, []).append(m.importance())
+        preds.append(part)
+    return pd.concat(preds, ignore_index=True), importances
