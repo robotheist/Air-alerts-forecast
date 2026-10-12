@@ -1,0 +1,340 @@
+<title>Планувальник тривог</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;600&display=swap">
+<style>
+/* Layout: map-first tool. Map + layer controls on the left, the selected region's
+   forecast and planner on the right, Telegram feed and method notes below. */
+:root {
+  --bg: #f4f6f9; --surface: #ffffff; --ink: #121a24; --ink2: #4a5566; --line: #dde3ea;
+  --accent: #2a78d6; --accent-ink: #ffffff; --alert: #c8382f; --alert-soft: #fbe3e1;
+  --grey: #c9cfd6; --chip: #eef2f7;
+  --q0:#e8f0fb; --q1:#cde2fb; --q2:#9ec5f4; --q3:#6da7ec; --q4:#3987e5; --q5:#256abf; --q6:#184f95; --q7:#0d366b;
+  --f-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --f-body: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-data: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f141b; --surface: #171e27; --ink: #e8edf3; --ink2: #a3afbf; --line: #2a3441;
+  --accent: #5598e7; --accent-ink: #0f141b; --alert: #e66767; --alert-soft: #3a1f22;
+  --grey: #3a4452; --chip: #222b36;
+  --q0:#1d2735; --q1:#1f3552; --q2:#234a77; --q3:#2a5f9c; --q4:#3a78c2; --q5:#5598e7; --q6:#86b6ef; --q7:#b7d3f6;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f141b; --surface: #171e27; --ink: #e8edf3; --ink2: #a3afbf; --line: #2a3441;
+  --accent: #5598e7; --accent-ink: #0f141b; --alert: #e66767; --alert-soft: #3a1f22;
+  --grey: #3a4452; --chip: #222b36;
+  --q0:#1d2735; --q1:#1f3552; --q2:#234a77; --q3:#2a5f9c; --q4:#3a78c2; --q5:#5598e7; --q6:#86b6ef; --q7:#b7d3f6;
+  color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 40px; display: grid; gap: 18px; }
+h1, h2 { font-family: var(--f-display); font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(1.35rem, 3.2vw, 1.9rem); letter-spacing: -0.01em; }
+h2 { font-size: 1rem; letter-spacing: 0.01em; }
+.label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink2); font-weight: 600; }
+.num { font-family: var(--f-data); font-variant-numeric: tabular-nums; }
+a { color: var(--accent); }
+header { display: grid; gap: 8px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--chip); color: var(--ink2); border-radius: 999px; padding: 3px 10px; font-size: 0.8rem; }
+.chip b { color: var(--ink); font-weight: 600; }
+.note { color: var(--ink2); font-size: 0.86rem; max-width: 72ch; margin: 0; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 14px; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-size: 0.85rem; border: 0; background: transparent; color: var(--ink2); padding: 6px 12px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+button:focus-visible, select:focus-visible, input:focus-visible, path:focus-visible, circle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+select, input[type="range"] { font: inherit; color: var(--ink); }
+select { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+#map { width: 100%; height: auto; display: block; }
+#map path.reg, #map circle.reg { stroke: var(--surface); stroke-width: 1.2; cursor: pointer; transition: fill .2s; }
+#map path.reg:hover, #map circle.reg:hover { stroke: var(--ink); }
+#map .sel { stroke: var(--ink) !important; stroke-width: 2.6 !important; }
+#map path.grey { fill: var(--grey); stroke: var(--surface); stroke-width: 1.2; }
+#map text { font-family: var(--f-body); font-size: 15px; fill: var(--ink2); pointer-events: none; }
+.legend { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--ink2); flex-wrap: wrap; }
+.ramp { display: flex; height: 10px; width: 180px; max-width: 50vw; border-radius: 3px; overflow: hidden; }
+.ramp span { flex: 1; }
+.dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.status { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pill { border-radius: 999px; padding: 3px 10px; font-size: 0.82rem; font-weight: 600; }
+.pill.on { background: var(--alert-soft); color: var(--alert); }
+.pill.off { background: var(--chip); color: var(--ink2); }
+.result { border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 6px; background: var(--bg); }
+.big { font-family: var(--f-display); font-size: clamp(1.8rem, 6vw, 2.6rem); font-weight: 600; line-height: 1.1; }
+.mode { font-size: 0.78rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; }
+.form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.form label { display: grid; gap: 4px; font-size: 0.8rem; color: var(--ink2); }
+@media (max-width: 420px) { .form { grid-template-columns: minmax(0, 1fr); } }
+.alts { display: flex; flex-wrap: wrap; gap: 8px; }
+.alts button { font: inherit; font-size: 0.82rem; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+.strip { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; }
+.strip div { height: 22px; border-radius: 2px; }
+.strip-axis { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); font-size: 0.7rem; color: var(--ink2); }
+svg text { font-family: var(--f-data); }
+.feed { display: grid; gap: 10px; max-height: 520px; overflow-y: auto; padding-right: 4px; }
+.post { border-bottom: 1px solid var(--line); padding-bottom: 10px; display: grid; gap: 4px; min-width: 0; }
+.post p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.post .t { font-family: var(--f-data); font-size: 0.78rem; color: var(--ink2); }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tags span { font-size: 0.72rem; background: var(--chip); color: var(--ink2); border-radius: 4px; padding: 1px 6px; }
+.tags span.me { background: var(--accent); color: var(--accent-ink); }
+footer { display: grid; gap: 10px; font-size: 0.86rem; color: var(--ink2); }
+footer p { margin: 0; max-width: 80ch; }
+.warn { border-left: 3px solid var(--alert); padding: 6px 12px; background: var(--surface); color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { #map path.reg, #map circle.reg { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Планувальник тривог</h1>
+    <p class="note">Оцінює, наскільки ймовірно, що повітряна тривога перерве ваші плани в обраній області,
+      у вибраний час. Перші 24 години рахує модель, далі використовується ритм тривог за останні 4 тижні.</p>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <div class="grid">
+    <section class="panel" aria-labelledby="maph">
+      <div class="row" style="justify-content: space-between;">
+        <h2 id="maph">Карта</h2>
+        <div class="seg" role="group" aria-label="Шар карти">
+          <button id="layer-fc" aria-pressed="true">Прогноз</button>
+          <button id="layer-now" aria-pressed="false">На момент знімка</button>
+        </div>
+      </div>
+      <div class="row" id="slider-row">
+        <label for="hour" class="label">Година</label>
+        <input id="hour" type="range" min="1" max="24" value="1" style="flex:1; min-width: 120px;">
+        <span id="hour-label" class="num"></span>
+      </div>
+      <svg id="map" role="img" aria-label="Карта областей України з ризиком тривоги"></svg>
+      <div class="legend" id="legend"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="regh">
+      <div class="row" style="justify-content: space-between;">
+        <h2 id="regh">Область</h2>
+        <select id="region" aria-label="Оберіть область"></select>
+      </div>
+      <div class="status" id="status"></div>
+
+      <div>
+        <div class="label">Ризик на найближчі 24 години (модель)</div>
+        <svg id="bars" viewBox="0 0 520 170" style="width:100%; height:auto; display:block;" role="img" aria-label="Погодинний прогноз"></svg>
+      </div>
+
+      <div style="display:grid; gap:10px;">
+        <div class="label">Мої плани</div>
+        <form class="form" id="plan">
+          <label for="pdate">День<select id="pdate"></select></label>
+          <label for="pstart">Початок<select id="pstart"></select></label>
+          <label for="pdur">Тривалість<select id="pdur"></select></label>
+        </form>
+        <div class="result" aria-live="polite">
+          <div class="mode" id="rmode"></div>
+          <div class="big num" id="rbig"></div>
+          <div id="rtext" class="note"></div>
+        </div>
+        <div>
+          <div class="label" style="margin-bottom:6px;">Спокійніший час того ж дня (за ритмом)</div>
+          <div class="alts" id="alts"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="label" style="margin-bottom:6px;">Ритм: частка днів із тривогою в цю годину, останні 28 днів</div>
+        <div class="strip" id="strip"></div>
+        <div class="strip-axis"><span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel" aria-labelledby="feedh">
+    <div class="row" style="justify-content: space-between;">
+      <h2 id="feedh">Повідомлення Повітряних сил</h2>
+      <div class="seg" role="group" aria-label="Фільтр повідомлень">
+        <button id="feed-mine" aria-pressed="true">Про цю область</button>
+        <button id="feed-all" aria-pressed="false">Усі</button>
+      </div>
+    </div>
+    <p class="note" id="feednote"></p>
+    <div class="feed" id="feed"></div>
+  </section>
+
+  <footer>
+    <p class="warn">Це оцінка ризику перерви, а не гарантія безпеки. Тривога може статися будь-коли:
+      завжди дійте за сигналом тривоги і офіційними повідомленнями.</p>
+    <p id="method"></p>
+    <p>Жива ситуація: <a href="https://t.me/s/kpszsu" target="_blank" rel="noopener">канал Повітряних сил</a> ·
+      <a href="https://alerts.in.ua" target="_blank" rel="noopener">карта тривог</a> ·
+      код і методика: <a href="https://github.com/robotheist/Air-alerts-forecast" target="_blank" rel="noopener">github.com/robotheist/Air-alerts-forecast</a></p>
+  </footer>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const $ = (id) => document.getElementById(id);
+const R = DATA.regions, byId = Object.fromEntries(R.map(r => [r.id, r]));
+const NAME = Object.fromEntries(R.map(r => [r.id, r.name]));
+const pct = (p) => Math.round(p * 100) + "%";
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const qcol = (p) => `var(--q${Math.max(0, Math.min(7, Math.floor(p * 8)))})`;
+const fmt = (s) => s.replace("T", " ");
+const DAYS = ["нд", "пн", "вт", "ср", "чт", "пт", "сб"];
+const dayName = (d) => { const [y, m, dd] = d.split("-").map(Number); const w = new Date(Date.UTC(y, m - 1, dd)).getUTCDay(); return `${DAYS[w]}, ${dd}.${String(m).padStart(2, "0")}`; };
+const addHours = (date, h) => { const [y, m, d] = date.split("-").map(Number); const t = new Date(Date.UTC(y, m - 1, d, h)); return t.toISOString().slice(0, 13) + ":00"; };
+
+let state = { region: "Kyiv City", layer: "fc", hour: 1, feedAll: false };
+try { const s = localStorage.getItem("planner.region"); if (s && byId[s]) state.region = s; } catch (e) {}
+
+// ---------- header
+const S = DATA.snapshot;
+$("meta").innerHTML = `
+  <span class="chip">прогноз зроблено о <b class="num">${fmt(S.origin)}</b></span>
+  <span class="chip">тривоги до <b class="num">${fmt(S.alerts_until)}</b></span>
+  <span class="chip">Telegram до <b class="num">${S.telegram_until ? fmt(S.telegram_until) : "—"}</b></span>
+  <span class="chip">час київський</span>`;
+
+// ---------- map
+const svg = $("map"), [W, H] = DATA.viewbox, NS = "http://www.w3.org/2000/svg";
+svg.setAttribute("viewBox", `-6 -6 ${W + 12} ${H + 12}`);
+for (const g of DATA.grey) { const p = document.createElementNS(NS, "path"); p.setAttribute("d", g.d); p.setAttribute("class", "grey");
+  const t = document.createElementNS(NS, "title"); t.textContent = g.name + ": прогнозу немає"; p.appendChild(t); svg.appendChild(p); }
+const shapes = {};
+for (const r of R) {
+  let el;
+  if (r.d) { el = document.createElementNS(NS, "path"); el.setAttribute("d", r.d); }
+  else { el = document.createElementNS(NS, "circle"); el.setAttribute("cx", DATA.kyiv[0]); el.setAttribute("cy", DATA.kyiv[1]); el.setAttribute("r", 13); }
+  el.setAttribute("class", "reg"); el.setAttribute("tabindex", "0"); el.setAttribute("role", "button");
+  el.setAttribute("aria-label", r.name);
+  const t = document.createElementNS(NS, "title"); el.appendChild(t);
+  el.addEventListener("click", () => select(r.id));
+  el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(r.id); } });
+  shapes[r.id] = el;
+}
+for (const r of R) if (r.d) svg.appendChild(shapes[r.id]);
+svg.appendChild(shapes["Kyiv City"]);  // the city circle on top of its oblast
+
+function paintMap() {
+  const h = state.hour;
+  $("hour-label").textContent = `+${h} год · ${fmt(DATA.hours[h - 1]).slice(5)}`;
+  $("slider-row").hidden = state.layer !== "fc";
+  for (const r of R) {
+    const el = shapes[r.id];
+    if (state.layer === "fc") {
+      const p = r.forecast[h - 1];
+      el.style.fill = qcol(p);
+      el.firstChild.textContent = `${r.name}: ${pct(p)} о ${fmt(DATA.hours[h - 1]).slice(11)}`;
+    } else {
+      el.style.fill = r.active ? "var(--alert)" : "var(--q0)";
+      el.firstChild.textContent = `${r.name}: ${r.active ? "тривога" : "без тривоги"} на ${fmt(S.alerts_until)}`;
+    }
+    el.classList.toggle("sel", r.id === state.region);
+  }
+  $("legend").innerHTML = state.layer === "fc"
+    ? `<span>0%</span><span class="ramp">${[0,1,2,3,4,5,6,7].map(i => `<span style="background:var(--q${i})"></span>`).join("")}</span><span>100%</span><span>· сірим: Крим і Луганщина, прогнозу немає</span>`
+    : `<span class="dot" style="background:var(--alert)"></span><span>тривога на ${fmt(S.alerts_until)}</span><span class="dot" style="background:var(--q0); border:1px solid var(--line)"></span><span>без тривоги</span>`;
+}
+$("layer-fc").onclick = () => { state.layer = "fc"; $("layer-fc").setAttribute("aria-pressed", "true"); $("layer-now").setAttribute("aria-pressed", "false"); paintMap(); };
+$("layer-now").onclick = () => { state.layer = "now"; $("layer-now").setAttribute("aria-pressed", "true"); $("layer-fc").setAttribute("aria-pressed", "false"); paintMap(); };
+$("hour").oninput = (e) => { state.hour = +e.target.value; paintMap(); };
+
+// ---------- region panel
+const sel = $("region");
+for (const r of [...R].sort((a, b) => a.name.localeCompare(b.name, "uk"))) { const o = document.createElement("option"); o.value = r.id; o.textContent = r.name; sel.appendChild(o); }
+sel.onchange = () => select(sel.value);
+
+function ago(min) { if (min >= 7 * 24 * 60) return "понад тиждень"; if (min < 90) return `${Math.round(min)} хв`; if (min < 48 * 60) return `${Math.round(min / 60)} год`; return `${Math.round(min / 1440)} дн`; }
+function paintStatus(r) {
+  const nb = r.neighbours.filter(n => byId[n].active).map(n => NAME[n]);
+  $("status").innerHTML = (r.active
+    ? `<span class="pill on">тривога на ${fmt(S.alerts_until).slice(11)}</span><span class="note">триває ${ago(r.run_min)}</span>`
+    : `<span class="pill off">без тривоги на ${fmt(S.alerts_until).slice(11)}</span><span class="note">остання закінчилась ${ago(r.since_min)} тому</span>`)
+    + `<span class="note">Сусіди з тривогою: ${nb.length ? nb.join(", ") : "немає"}</span>`;
+}
+
+function paintBars(r, hi) {
+  const w = 520, h = 170, L = 34, B = 26, T = 8, bw = (w - L - 4) / 24;
+  const y = (p) => T + (h - T - B) * (1 - p);
+  let s = "";
+  for (const g of [0, 0.5, 1]) s += `<line x1="${L}" x2="${w}" y1="${y(g)}" y2="${y(g)}" stroke="${css("--line")}" />
+    <text x="${L - 6}" y="${y(g) + 4}" font-size="11" text-anchor="end" fill="${css("--ink2")}">${g * 100}%</text>`;
+  r.forecast.forEach((p, i) => {
+    const x = L + 2 + i * bw, on = hi.has(i);
+    s += `<rect x="${x + 1}" y="${y(p)}" width="${bw - 2}" height="${Math.max(1, y(0) - y(p))}" rx="2" fill="${on ? css("--alert") : css("--accent")}" opacity="${on ? 1 : 0.85}"><title>${fmt(DATA.hours[i])}: ${pct(p)}</title></rect>`;
+    if (i % 3 === 0) s += `<text x="${x + bw / 2}" y="${h - 8}" font-size="11" text-anchor="middle" fill="${css("--ink2")}">${DATA.hours[i].slice(11, 13)}</text>`;
+  });
+  $("bars").innerHTML = s;
+}
+
+function paintStrip(r) {
+  $("strip").innerHTML = r.rhythm.map((row, h) => `<div style="background:${qcol(row[0])}" title="${String(h).padStart(2, "0")}:00 — ${pct(row[0])} днів"></div>`).join("");
+}
+
+// ---------- planner
+const firstDate = DATA.hours[0].slice(0, 10);
+for (let k = 0; k < 7; k++) { const d = addHours(firstDate, 24 * k).slice(0, 10); const o = document.createElement("option"); o.value = d; o.textContent = (k === 0 ? "сьогодні, " : k === 1 ? "завтра, " : "") + dayName(d); $("pdate").appendChild(o); }
+for (let hh = 0; hh < 24; hh++) { const o = document.createElement("option"); o.value = hh; o.textContent = String(hh).padStart(2, "0") + ":00"; $("pstart").appendChild(o); }
+for (let d = 1; d <= 6; d++) { const o = document.createElement("option"); o.value = d; o.textContent = d + " год"; $("pdur").appendChild(o); }
+$("pstart").value = 19; $("pdur").value = 3;
+["pdate", "pstart", "pdur"].forEach(id => $(id).onchange = () => paintPlan(byId[state.region]));
+
+function rhythmP(r, start, dur) { return r.rhythm[start][dur - 1]; }
+function paintPlan(r) {
+  const date = $("pdate").value, start = +$("pstart").value, dur = +$("pdur").value;
+  const keys = Array.from({ length: dur }, (_, k) => addHours(date, start + k));
+  const idx = keys.map(k => DATA.hours.indexOf(k));
+  const rp = rhythmP(r, start, dur), days = S.rhythm_days;
+  const hi = new Set(idx.filter(i => i >= 0));
+  if (idx.every(i => i >= 0)) {
+    const ps = idx.map(i => r.forecast[i]);
+    const lo = Math.max(...ps), up = 1 - ps.reduce((a, p) => a * (1 - p), 1);
+    $("rmode").textContent = "Режим моделі · до 24 годин";
+    $("rbig").textContent = Math.round(lo * 100) === Math.round(up * 100) ? pct(lo) : `${pct(lo)}–${pct(up)}`;
+    $("rtext").textContent = `Ймовірність, що за ${dur} год тривога буде хоча б раз. Нижня межа — найризиковіша година, верхня — оцінка, яка не враховує зв'язку між сусідніми годинами. За ритмом останніх ${days} днів таке вікно зачіпала тривога в ${Math.round(rp * days)} з ${days} днів (${pct(rp)}).`;
+  } else {
+    $("rmode").textContent = idx.some(i => i >= 0) ? "Режим ритму · вікно виходить за 24 години" : "Режим ритму · далі ніж 24 години";
+    $("rbig").textContent = pct(rp);
+    $("rtext").textContent = `Модель не прогнозує так далеко, тому це статистика: за останні ${days} днів тривога зачепила проміжок ${String(start).padStart(2, "0")}:00–${String((start + dur) % 24).padStart(2, "0")}:00 у ${Math.round(rp * days)} з ${days} днів.`;
+  }
+  const alts = [];
+  for (let s = Math.max(0, start - 4); s <= Math.min(23, start + 4); s++) if (s !== start) alts.push([s, rhythmP(r, s, dur)]);
+  alts.sort((a, b) => a[1] - b[1]);
+  $("alts").innerHTML = alts.slice(0, 3).filter(a => a[1] < rp).map(([s, p]) => `<button type="button" data-s="${s}">${String(s).padStart(2, "0")}:00 · ${pct(p)}</button>`).join("") || `<span class="note">Поруч немає спокійнішого часу.</span>`;
+  $("alts").querySelectorAll("button").forEach(b => b.onclick = () => { $("pstart").value = b.dataset.s; paintPlan(r); });
+  paintBars(r, hi);
+}
+
+// ---------- feed
+function paintFeed() {
+  const items = DATA.feed.filter(p => state.feedAll || p.regions.includes(state.region));
+  $("feednote").textContent = state.feedAll
+    ? `Усі ${DATA.feed.length} повідомлень каналу @kpszsu за добу до ${fmt(S.telegram_until || "")}. Мітки — області, які розпізнала наша модель.`
+    : `${items.length} з ${DATA.feed.length} повідомлень за добу до ${fmt(S.telegram_until || "")} згадують «${NAME[state.region]}» (за розпізнаванням нашої моделі).`;
+  $("feed").innerHTML = items.slice(0, 60).map(p => `<article class="post"><div class="t">${fmt(p.t)}</div><p></p>
+    <div class="tags">${p.regions.map(g => `<span class="${g === state.region ? "me" : ""}">${NAME[g] || g}</span>`).join("")}</div></article>`).join("")
+    || `<p class="note">За цю добу канал не згадував цю область.</p>`;
+  const ps = $("feed").querySelectorAll(".post p");
+  items.slice(0, 60).forEach((p, i) => { ps[i].textContent = p.text; });
+}
+$("feed-mine").onclick = () => { state.feedAll = false; $("feed-mine").setAttribute("aria-pressed", "true"); $("feed-all").setAttribute("aria-pressed", "false"); paintFeed(); };
+$("feed-all").onclick = () => { state.feedAll = true; $("feed-all").setAttribute("aria-pressed", "true"); $("feed-mine").setAttribute("aria-pressed", "false"); paintFeed(); };
+
+// ---------- method
+const bt = DATA.backtest;
+$("method").textContent = `Як це рахується. Модель — LightGBM з проєкту: на наступну годину з ознаками з Telegram (v3), далі без них (v2). Ритм — частка днів за останні ${S.rhythm_days} днів, коли тривога зачепила таке саме вікно. Перевірка ритму на останніх 28 днях (${bt.n.toLocaleString("uk")} вікон по 1–3 год): Brier ${bt.brier.toFixed(3)} проти ${bt.brier_base.toFixed(3)} у прогнозу «завжди середня частота». Дані — знімок на час, указаний угорі, а не живий потік; області без власних даних (Крим, Луганщина) не прогнозуються.`;
+
+function select(id) {
+  state.region = id; sel.value = id;
+  try { localStorage.setItem("planner.region", id); } catch (e) {}
+  const r = byId[id];
+  $("regh").textContent = r.name + (id === "Kyiv City" ? "" : " область");
+  paintStatus(r); paintStrip(r); paintPlan(r); paintMap(); paintFeed();
+}
+select(state.region);
+</script>

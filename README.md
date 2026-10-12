@@ -50,6 +50,23 @@ The full story of what was tried and what failed is in [`docs/experiment_log.md`
 ![lead time](reports/figures/07_text_lead_time.png)
 ![timeline](reports/figures/05_example_timeline.png)
 
+## Planner app (`app/planner.html`)
+
+A single self-contained page built by `scripts/07_build_planner.py`. Open the file in any browser:
+* **map** of the oblasts, coloured by the forecast for a chosen hour (+1…+24 h), or by the alert
+  state at the snapshot moment;
+* for the chosen region: status and neighbours, the 24-hour forecast, and a **planner**. You pick a day,
+  a start time and a duration and get the probability that an alert interrupts the event:
+  * within 24 h, *model mode*: a range from the riskiest hour to the upper bound $1-\prod_i(1-p_i)$,
+    using v3 for +1 h and v2 for +2…+24 h;
+  * further ahead, *rhythm mode*: the share of the last 28 days on which an alert touched the same
+    window. In a backtest on the latest 28 days its Brier score is 0.183, vs 0.248 for a constant base rate;
+* the last 24 h of @kpszsu posts, tagged with the regions our text pipeline recognised.
+
+It is a **snapshot** (time stamps at the top), not a live feed. Rebuild it after refreshing the data. It
+estimates the risk of disruption and is not a safety guarantee. Map: OpenStreetMap boundaries
+(`data/external/ua_oblasts.geojson`, ODbL).
+
 ## Data
 
 * **Alerts**: [Vadimkin/ukrainian-air-raid-sirens-dataset](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset),
@@ -102,7 +119,9 @@ air-alerts-forecast/
 │   ├── 03_train_evaluate.py    # walk-forward test, metrics, figures
 │   ├── 04_forecast_now.py      # forecast from the latest hour (v2, needs no fresh Telegram)
 │   ├── 05_text_lead_time.py    # does the channel speak before the siren?
-│   └── 06_significance.py      # bootstrap test v3 vs v2
+│   ├── 06_significance.py      # bootstrap test v3 vs v2
+│   └── 07_build_planner.py     # builds app/planner.html
+├── app/planner.html            # interactive planner (generated; template in app/)
 ├── tests/test_leakage.py
 ├── reports/{metrics,figures}/  # generated results
 ├── docs/experiment_log.md      # what was tried, what failed, why
@@ -122,6 +141,7 @@ python scripts/03_train_evaluate.py  # ~8 min
 python scripts/05_text_lead_time.py
 python scripts/06_significance.py
 python scripts/04_forecast_now.py
+python scripts/07_build_planner.py   # app/planner.html
 ```
 
 ## Limitations
